@@ -1,6 +1,6 @@
 The purpose of a custom Grafana plugin is to provide project specific data to the Grafana Dashboard. Let's take a look at the architecture of a Grafana datasource plugin.
 
-![Grafana plugin architecture](./grafana custom plugin integration.drawio.png)
+![Grafana plugin architecture](grafana custom plugin integration.drawio.png)
 
 I created a front end Grafana plugin using the steps found here ...
 
