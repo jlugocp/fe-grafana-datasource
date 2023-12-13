@@ -1,115 +1,130 @@
-# Grafana data source plugin template
+The purpose of a custom Grafana plugin is to provide project specific data to the Grafana Dashboard. Let's take a look at the architecture of a Grafana datasource plugin.
 
-This template is a starting point for building a Data Source Plugin for Grafana.
+![Grafana plugin architecture](./grafana custom plugin integration.drawio.png)
 
-## What are Grafana data source plugins?
+I created a front end Grafana plugin using the steps found here ...
 
-Grafana supports a wide range of data sources, including Prometheus, MySQL, and even Datadog. There’s a good chance you can already visualize metrics from the systems you have set up. In some cases, though, you already have an in-house metrics solution that you’d like to add to your Grafana dashboards. Grafana Data Source Plugins enables integrating such solutions with Grafana.
+https://grafana.com/developers/plugin-tools/tutorials/build-a-data-source-plugin
 
-## Getting started
+Note that in this scenario, all data comes from the plugin. No data is stored in Grafana.
+
+When prompted for a plugin type, choose datasource with no backend part.
+
+In **datasource.ts**, I created a method which calls a custom endpoint that returns a session id ...
+
+```java
+  // Calls custom web service for session id
+  async getJwt() {
+    const response = getBackendSrv().fetch<string>({
+      url: `http://localhost:8080/adminJwt`
+    });
+    return await lastValueFrom(response);
+  }
+
+```
+
+I also created a method which retrieves data from a custom endpoint ...
+
+```java
+  // Calls custom web service for data. Includes the session id.
+  async getData(sessionId: string) {
+    const response = getBackendSrv().fetch<SvrResp[]>({
+      url: `http://localhost:8080/get`,
+      credentials: 'include',
+      headers: {
+          Cookie: 'JSESSIONID=' + sessionId
+      }
+    });
+    return await lastValueFrom(response);
+  }
+
+```
+
+In the **testDatasource** method, I added custom code to make sure that we can successfully call one of the custom endpoints ...
+
+```java
+  async testDatasource() {
+    // Implement a health check for your data source.
+
+    // Custom code starts here
+
+    const response = await getBackendSrv().fetch<any>({
+      url: 'http://localhost:8080/get',
+      headers: {
+        mode: 'no-cors'
+      }
+    });
+    await lastValueFrom(response);
+
+    // End of custom code
+
+    return {
+      status: 'success',
+      message: 'Success',
+    };
+  }
+
+```
+
+And finally, here's the **query** method which makes everything happen ...
+
+```java
+  async query(options: DataQueryRequest<MyQuery>): Promise<DataQueryResponse> {
+    const { range } = options;
+    const from = range!.from.valueOf();
+    const to = range!.to.valueOf();
+
+    // Custom code starts here ...
+
+    console.log('options', options);
+    const query = getTemplateSrv().replace('$brics', options.scopedVars);
+    console.log('query', query);
+
+    const res = await this.getJwt();
+    const sessionId: string = res.data;
+    console.log('sessionId - ', sessionId);
+
+    const res2 = this.getData(sessionId);
+    const data2 = (await res2).data;
+    console.log('data = ', data2);
+
+    // End of custom code
+
+    // Return a constant for each query.
+    const data = options.targets.map((target) => {
+      return new MutableDataFrame({
+        refId: target.refId,
+        fields: [
+          { name: 'Time', values: [from, to], type: FieldType.time },
+          { name: 'Value', values: [3, data2[2].occurrences], type: FieldType.number }, // Passing a data value from the getData() call.
+        ],
+      });
+    });
+
+    return { data };
+  }
+
+```
+
+Note that in the query method, we are retrieving a scoped variable.
 
 
-### Frontend
 
-1. Install dependencies
+The whole process is as follows ...
 
-   ```bash
-   npm install
-   ```
+1. In the Grafana Admin Console, go to Connections
+2. Search for and select your plugin
+3. Press the "Create a Front End Datasource" button
+4. Press "Save & Test"
+5. Press "Build a Dashboard"
+6. Press the gear icon ![grafana](./grafana.png)
+7. Under Settings, click Variables
+8. Click "Add Variable"
+9. Choose variable type "custom"
+10. Give the variable a name that you will reference from the plugin code.
+11. Press the "Apply" button.
+12. Save the dashboard
+13. Press the "Add Visualization" button.
+14. Select the plugin.
+15. You should see a line chart and a drop down in the upper left of the dashboard with the variable values.
 
-2. Build plugin in development mode and run in watch mode
-
-   ```bash
-   npm run dev
-   ```
-
-3. Build plugin in production mode
-
-   ```bash
-   npm run build
-   ```
-
-4. Run the tests (using Jest)
-
-   ```bash
-   # Runs the tests and watches for changes, requires git init first
-   npm run test
-
-   # Exits after running all the tests
-   npm run test:ci
-   ```
-
-5. Spin up a Grafana instance and run the plugin inside it (using Docker)
-
-   ```bash
-   npm run server
-   ```
-
-6. Run the E2E tests (using Cypress)
-
-   ```bash
-   # Spins up a Grafana instance first that we tests against
-   npm run server
-
-   # Starts the tests
-   npm run e2e
-   ```
-
-7. Run the linter
-
-   ```bash
-   npm run lint
-
-   # or
-
-   npm run lint:fix
-   ```
-
-
-# Distributing your plugin
-
-When distributing a Grafana plugin either within the community or privately the plugin must be signed so the Grafana application can verify its authenticity. This can be done with the `@grafana/sign-plugin` package.
-
-_Note: It's not necessary to sign a plugin during development. The docker development environment that is scaffolded with `@grafana/create-plugin` caters for running the plugin without a signature._
-
-## Initial steps
-
-Before signing a plugin please read the Grafana [plugin publishing and signing criteria](https://grafana.com/docs/grafana/latest/developers/plugins/publishing-and-signing-criteria/) documentation carefully.
-
-`@grafana/create-plugin` has added the necessary commands and workflows to make signing and distributing a plugin via the grafana plugins catalog as straightforward as possible.
-
-Before signing a plugin for the first time please consult the Grafana [plugin signature levels](https://grafana.com/docs/grafana/latest/developers/plugins/sign-a-plugin/#plugin-signature-levels) documentation to understand the differences between the types of signature level.
-
-1. Create a [Grafana Cloud account](https://grafana.com/signup).
-2. Make sure that the first part of the plugin ID matches the slug of your Grafana Cloud account.
-   - _You can find the plugin ID in the `plugin.json` file inside your plugin directory. For example, if your account slug is `acmecorp`, you need to prefix the plugin ID with `acmecorp-`._
-3. Create a Grafana Cloud API key with the `PluginPublisher` role.
-4. Keep a record of this API key as it will be required for signing a plugin
-
-## Signing a plugin
-
-### Using Github actions release workflow
-
-If the plugin is using the github actions supplied with `@grafana/create-plugin` signing a plugin is included out of the box. The [release workflow](./.github/workflows/release.yml) can prepare everything to make submitting your plugin to Grafana as easy as possible. Before being able to sign the plugin however a secret needs adding to the Github repository.
-
-1. Please navigate to "settings > secrets > actions" within your repo to create secrets.
-2. Click "New repository secret"
-3. Name the secret "GRAFANA_API_KEY"
-4. Paste your Grafana Cloud API key in the Secret field
-5. Click "Add secret"
-
-#### Push a version tag
-
-To trigger the workflow we need to push a version tag to github. This can be achieved with the following steps:
-
-1. Run `npm version <major|minor|patch>`
-2. Run `git push origin main --follow-tags`
-
-
-## Learn more
-
-Below you can find source code for existing app plugins and other related documentation.
-
-- [Basic data source plugin example](https://github.com/grafana/grafana-plugin-examples/tree/master/examples/datasource-basic#readme)
-- [`plugin.json` documentation](https://grafana.com/developers/plugin-tools/reference-plugin-json)
-- [How to sign a plugin?](https://grafana.com/docs/grafana/latest/developers/plugins/sign-a-plugin/)
